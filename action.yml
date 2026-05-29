@@ -1,0 +1,99 @@
+name: 'Busbar — sf-org-delete'
+description: 'Delete a Salesforce scratch org and/or OrgSnapshot via direct API. Auths the DevHub via busbar-auth.'
+author: 'Busbar'
+
+inputs:
+  scratch-org-info-id:
+    description: 'ScratchOrgInfo id — its matching ActiveScratchOrg will be deleted (which deletes the scratch).'
+    required: false
+    default: ''
+  snapshot-id:
+    description: 'OrgSnapshot id — deleted directly.'
+    required: false
+    default: ''
+  ignore-missing:
+    description: 'Do not fail if nothing matches (idempotent cleanup).'
+    required: false
+    default: 'true'
+  version:
+    description: 'Release tag of the sf-org-delete binary.'
+    required: false
+    default: 'latest'
+  binary-repo:
+    description: 'GitHub repo hosting prebuilt binary releases.'
+    required: false
+    default: 'busbar-actions/actions-dist'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve release tag
+      id: tag
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${{ inputs.version }}" == "latest" ]]; then
+          tag=$(gh release view --repo "${{ inputs.binary-repo }}" --json tagName -q .tagName)
+        else
+          tag="${{ inputs.version }}"
+        fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Resolve binary asset name
+      id: asset
+      shell: bash
+      run: |
+        case "${{ runner.os }}-${{ runner.arch }}" in
+          Linux-X64)   name="sf-org-delete-x86_64-unknown-linux-gnu" ;;
+          Linux-ARM64) name="sf-org-delete-aarch64-unknown-linux-gnu" ;;
+          macOS-X64)   name="sf-org-delete-x86_64-apple-darwin" ;;
+          macOS-ARM64) name="sf-org-delete-aarch64-apple-darwin" ;;
+          Windows-X64) name="sf-org-delete-x86_64-pc-windows-msvc.exe" ;;
+          *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}" >&2; exit 1 ;;
+        esac
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+
+    - name: Download sf-org-delete binary
+      shell: bash
+      run: |
+        set -euo pipefail
+        bin_dir="${RUNNER_TEMP}/sf-org-delete"
+        mkdir -p "$bin_dir"
+        gh release download "${{ steps.tag.outputs.tag }}" \
+          --repo "${{ inputs.binary-repo }}" \
+          --pattern "${{ steps.asset.outputs.name }}" \
+          --dir "$bin_dir"
+        bin_path="$bin_dir/${{ steps.asset.outputs.name }}"
+        chmod +x "$bin_path"
+        echo "$bin_dir" >> "$GITHUB_PATH"
+        if [[ "$bin_path" != "$bin_dir/sf-org-delete" && "$bin_path" != "$bin_dir/sf-org-delete.exe" ]]; then
+          ext=""
+          [[ "${{ runner.os }}" == "Windows" ]] && ext=".exe"
+          ln -sf "$bin_path" "$bin_dir/sf-org-delete$ext"
+        fi
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Delete
+      shell: bash
+      env:
+        SF_ACCESS_TOKEN: ${{ env.SF_ACCESS_TOKEN }}
+        SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
+        BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
+        BUSBAR_TOKEN_HANDLER: ${{ env.BUSBAR_TOKEN_HANDLER }}
+        BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
+        ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${{ inputs.scratch-org-info-id }}" && -z "${{ inputs.snapshot-id }}" ]]; then
+          echo "Nothing to delete (no --scratch-org-info-id, no --snapshot-id)" >&2
+          exit 0
+        fi
+        args=()
+        [[ -n "${{ inputs.scratch-org-info-id }}" ]] && args+=(--scratch-org-info-id "${{ inputs.scratch-org-info-id }}")
+        [[ -n "${{ inputs.snapshot-id }}" ]] && args+=(--snapshot-id "${{ inputs.snapshot-id }}")
+        [[ "${{ inputs.ignore-missing }}" == "true" ]] && args+=(--ignore-missing)
+        sf-org-delete "${args[@]}"
