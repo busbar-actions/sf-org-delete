@@ -24,61 +24,44 @@ inputs:
     required: false
     default: 'busbar-actions/actions-dist'
 
+outputs:
+  deleted-scratch-org:
+    description: '"true" when a scratch org was deleted.'
+    value: ${{ steps.delete.outputs.deleted_scratch_org }}
+  deleted-snapshot:
+    description: '"true" when a snapshot was deleted.'
+    value: ${{ steps.delete.outputs.deleted_snapshot }}
+  scratch-org-info-id:
+    description: 'Echoes the requested ScratchOrgInfo id when provided.'
+    value: ${{ steps.delete.outputs.scratch_org_info_id }}
+  active-scratch-org-id:
+    description: 'ActiveScratchOrg id that was deleted, when one was found.'
+    value: ${{ steps.delete.outputs.active_scratch_org_id }}
+  snapshot-id:
+    description: 'Echoes the requested OrgSnapshot id when provided.'
+    value: ${{ steps.delete.outputs.snapshot_id }}
+
+# The binary owns all logic and UX: it reads its inputs from INPUT_*, applies the
+# empty-selector guard, deletes the scratch org and/or snapshot, writes
+# GITHUB_OUTPUT, the step summary and annotations. This action only installs it
+# and passes inputs (plus the SF/OIDC auth env) through.
 runs:
   using: 'composite'
   steps:
-    - name: Resolve release tag
-      id: tag
-      shell: bash
-      run: |
-        set -euo pipefail
-        if [[ "${{ inputs.version }}" == "latest" ]]; then
-          tag=$(gh release view --repo "${{ inputs.binary-repo }}" --json tagName -q .tagName)
-        else
-          tag="${{ inputs.version }}"
-        fi
-        echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      env:
-        GH_TOKEN: ${{ github.token }}
-
-    - name: Resolve binary asset name
-      id: asset
-      shell: bash
-      run: |
-        case "${{ runner.os }}-${{ runner.arch }}" in
-          Linux-X64)   name="sf-org-delete-x86_64-unknown-linux-gnu" ;;
-          Linux-ARM64) name="sf-org-delete-aarch64-unknown-linux-gnu" ;;
-          macOS-X64)   name="sf-org-delete-x86_64-apple-darwin" ;;
-          macOS-ARM64) name="sf-org-delete-aarch64-apple-darwin" ;;
-          Windows-X64) name="sf-org-delete-x86_64-pc-windows-msvc.exe" ;;
-          *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}" >&2; exit 1 ;;
-        esac
-        echo "name=$name" >> "$GITHUB_OUTPUT"
-
-    - name: Download sf-org-delete binary
-      shell: bash
-      run: |
-        set -euo pipefail
-        bin_dir="${RUNNER_TEMP}/sf-org-delete"
-        mkdir -p "$bin_dir"
-        gh release download "${{ steps.tag.outputs.tag }}" \
-          --repo "${{ inputs.binary-repo }}" \
-          --pattern "${{ steps.asset.outputs.name }}" \
-          --dir "$bin_dir"
-        bin_path="$bin_dir/${{ steps.asset.outputs.name }}"
-        chmod +x "$bin_path"
-        echo "$bin_dir" >> "$GITHUB_PATH"
-        if [[ "$bin_path" != "$bin_dir/sf-org-delete" && "$bin_path" != "$bin_dir/sf-org-delete.exe" ]]; then
-          ext=""
-          [[ "${{ runner.os }}" == "Windows" ]] && ext=".exe"
-          ln -sf "$bin_path" "$bin_dir/sf-org-delete$ext"
-        fi
-      env:
-        GH_TOKEN: ${{ github.token }}
+    - name: Set up sf-org-delete
+      uses: busbar-actions/setup@main
+      with:
+        binary: sf-org-delete
+        version: ${{ inputs.version }}
+        binary-repo: ${{ inputs.binary-repo }}
 
     - name: Delete
+      id: delete
       shell: bash
       env:
+        INPUT_SCRATCH_ORG_INFO_ID: ${{ inputs.scratch-org-info-id }}
+        INPUT_SNAPSHOT_ID: ${{ inputs.snapshot-id }}
+        INPUT_IGNORE_MISSING: ${{ inputs.ignore-missing }}
         SF_ACCESS_TOKEN: ${{ env.SF_ACCESS_TOKEN }}
         SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
         BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
@@ -86,14 +69,4 @@ runs:
         BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
         ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-      run: |
-        set -euo pipefail
-        if [[ -z "${{ inputs.scratch-org-info-id }}" && -z "${{ inputs.snapshot-id }}" ]]; then
-          echo "Nothing to delete (no --scratch-org-info-id, no --snapshot-id)" >&2
-          exit 0
-        fi
-        args=()
-        [[ -n "${{ inputs.scratch-org-info-id }}" ]] && args+=(--scratch-org-info-id "${{ inputs.scratch-org-info-id }}")
-        [[ -n "${{ inputs.snapshot-id }}" ]] && args+=(--snapshot-id "${{ inputs.snapshot-id }}")
-        [[ "${{ inputs.ignore-missing }}" == "true" ]] && args+=(--ignore-missing)
-        sf-org-delete "${args[@]}"
+      run: sf-org-delete
