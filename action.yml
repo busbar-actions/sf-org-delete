@@ -25,19 +25,19 @@ inputs:
     default: 'busbar-actions/actions-dist'
 
 outputs:
-  deleted-scratch-org:
+  deleted_scratch_org:
     description: '"true" when a scratch org was deleted.'
     value: ${{ steps.delete.outputs.deleted_scratch_org }}
-  deleted-snapshot:
+  deleted_snapshot:
     description: '"true" when a snapshot was deleted.'
     value: ${{ steps.delete.outputs.deleted_snapshot }}
-  scratch-org-info-id:
+  scratch_org_info_id:
     description: 'Echoes the requested ScratchOrgInfo id when provided.'
     value: ${{ steps.delete.outputs.scratch_org_info_id }}
-  active-scratch-org-id:
+  active_scratch_org_id:
     description: 'ActiveScratchOrg id that was deleted, when one was found.'
     value: ${{ steps.delete.outputs.active_scratch_org_id }}
-  snapshot-id:
+  snapshot_id:
     description: 'Echoes the requested OrgSnapshot id when provided.'
     value: ${{ steps.delete.outputs.snapshot_id }}
 
