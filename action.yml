@@ -2,7 +2,24 @@ name: 'Busbar — sf-org-delete'
 description: 'Delete a Salesforce scratch org and/or OrgSnapshot via direct API. Auths the DevHub via busbar-auth.'
 author: 'Busbar'
 
+# AUTH (self-mint via OIDC — the DEFAULT, primary path): set `target-instance`
+# to the Busbar-equipped DevHub's instance URL (e.g. busbar-pilot-demo2) and
+# grant `permissions:
+# id-token: write` in the caller job. The binary mints its OWN short-lived
+# Salesforce token IN-PROCESS from the runner's GitHub OIDC id-token, uses it,
+# and revokes + zeroizes it at exit (SalesforceSession::dispose). No Salesforce
+# access token is ever handed to a script, written to GITHUB_ENV, or passed as
+# an action input/output. There is NO org-auth handoff step.
 inputs:
+  target-instance:
+    description: >-
+      PRIMARY OIDC path: instance URL of the Busbar-equipped DevHub to mint a
+      short-lived token against (e.g. busbar-pilot-demo2). Passed to the binary as
+      SF_INSTANCE_URL; with
+      `id-token: write` granted, busbar-auth OIDC-exchanges in-process (no
+      SF_ACCESS_TOKEN handoff).
+    required: false
+    default: ''
   scratch-org-info-id:
     description: 'ScratchOrgInfo id — its matching ActiveScratchOrg will be deleted (which deletes the scratch).'
     required: false
@@ -15,6 +32,33 @@ inputs:
     description: 'Do not fail if nothing matches (idempotent cleanup).'
     required: false
     default: 'true'
+  eca-client-id:
+    description: 'Optional OIDC tuning: the busbar ECA consumer key (client_id). Maps to ECA_CLIENT_ID. Has a baked default.'
+    required: false
+    default: ''
+  token-handler:
+    description: 'Optional OIDC tuning: the Apex token-exchange handler dev name. Maps to TOKEN_HANDLER_APEX. Defaults to BBGitHubTokenExchangeHandler.'
+    required: false
+    default: ''
+  oidc-audience:
+    description: 'Optional OIDC tuning: audience to request in the GitHub OIDC token. Maps to OIDC_AUDIENCE. Defaults to the target instance URL.'
+    required: false
+    default: ''
+  sf-instance-url:
+    description: >-
+      OPTIONAL local-dev/advanced override of the DevHub instance URL. When set,
+      takes precedence over `target-instance`. Pair with `sf-access-token` for
+      the binary's local-dev fast path (skips OIDC).
+    required: false
+    default: ''
+  sf-access-token:
+    description: >-
+      OPTIONAL local-dev/advanced override ONLY. A pre-obtained DevHub access
+      token; when set the binary uses it directly and skips OIDC self-minting.
+      Leave EMPTY in CI — the default OIDC path mints a short-lived token
+      in-process so no token is ever handed to this action.
+    required: false
+    default: ''
   version:
     description: 'Release tag of the sf-org-delete binary.'
     required: false
@@ -48,25 +92,46 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Set up sf-org-delete
+    - name: Install the sf-org-delete binary from actions-dist
       uses: busbar-actions/setup@main
       with:
         binary: sf-org-delete
         version: ${{ inputs.version }}
         binary-repo: ${{ inputs.binary-repo }}
 
-    - name: Delete
+    - name: Delete the scratch org (ScratchOrgInfo ${{ inputs.scratch-org-info-id }}) and/or OrgSnapshot (${{ inputs.snapshot-id }}) via the Salesforce API
       id: delete
       shell: bash
+      # AUTH (default): self-mint via OIDC — SF_INSTANCE_URL = the Busbar-equipped DevHub
+      # (`target-instance`); caller grants `id-token: write` so the runner injects
+      # ACTIONS_ID_TOKEN_REQUEST_*; the binary mints + revokes its own short-lived
+      # token in-process. We do NOT set SF_ACCESS_TOKEN here (no token handoff,
+      # nothing written to GITHUB_ENV); it is only populated from the optional
+      # `sf-access-token` local-dev override input.
       env:
         INPUT_SCRATCH_ORG_INFO_ID: ${{ inputs.scratch-org-info-id }}
         INPUT_SNAPSHOT_ID: ${{ inputs.snapshot-id }}
         INPUT_IGNORE_MISSING: ${{ inputs.ignore-missing }}
-        SF_ACCESS_TOKEN: ${{ env.SF_ACCESS_TOKEN }}
-        SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
+        # DevHub instance URL: optional override wins, else `target-instance`.
+        SF_INSTANCE_URL: ${{ inputs.sf-instance-url != '' && inputs.sf-instance-url || inputs.target-instance }}
+        # OPTIONAL local-dev override ONLY. Empty in CI → busbar-auth self-mints.
+        SF_ACCESS_TOKEN: ${{ inputs.sf-access-token }}
+        # OIDC tuning (all optional; baked defaults in busbar-auth).
+        ECA_CLIENT_ID: ${{ inputs.eca-client-id }}
+        TOKEN_HANDLER_APEX: ${{ inputs.token-handler }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
         BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
         BUSBAR_TOKEN_HANDLER: ${{ env.BUSBAR_TOKEN_HANDLER }}
         BUSBAR_OIDC_AUDIENCE: ${{ env.BUSBAR_OIDC_AUDIENCE }}
+        # GitHub injects these only when the caller job grants id-token: write.
         ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-      run: sf-org-delete
+      run: |
+        set -euo pipefail
+        echo "▶ TESTING: delete via the Salesforce API at '${SF_INSTANCE_URL}' — ScratchOrgInfo='${INPUT_SCRATCH_ORG_INFO_ID}' OrgSnapshot='${INPUT_SNAPSHOT_ID}' (ignore-missing=${INPUT_IGNORE_MISSING})"
+        # The binary owns the empty-selector guard, the delete(s), OIDC self-mint,
+        # and GITHUB_OUTPUT/summary/annotations. Any non-zero exit aborts the step.
+        # ignore-missing is the binary's own idempotency contract (a record that
+        # does not exist is reported, not an error) — NOT shell error suppression.
+        sf-org-delete
+        echo "✓ RESULT: deleted_scratch_org=${{ steps.delete.outputs.deleted_scratch_org }} (ActiveScratchOrg=${{ steps.delete.outputs.active_scratch_org_id }}) deleted_snapshot=${{ steps.delete.outputs.deleted_snapshot }} (OrgSnapshot=${{ steps.delete.outputs.snapshot_id }})"
