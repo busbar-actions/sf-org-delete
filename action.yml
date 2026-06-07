@@ -92,14 +92,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install the sf-org-delete binary from actions-dist
+    - name: Install binary
       uses: busbar-actions/setup@main
       with:
         binary: sf-org-delete
         version: ${{ inputs.version }}
         binary-repo: ${{ inputs.binary-repo }}
 
-    - name: Delete the scratch org (ScratchOrgInfo ${{ inputs.scratch-org-info-id }}) and/or OrgSnapshot (${{ inputs.snapshot-id }}) via the Salesforce API
+    - name: Delete scratch
       id: delete
       shell: bash
       # AUTH (default): self-mint via OIDC — SF_INSTANCE_URL = the Busbar-equipped DevHub
@@ -128,10 +128,10 @@ runs:
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
       run: |
         set -euo pipefail
-        echo "▶ TESTING: delete via the Salesforce API at '${SF_INSTANCE_URL}' — ScratchOrgInfo='${INPUT_SCRATCH_ORG_INFO_ID}' OrgSnapshot='${INPUT_SNAPSHOT_ID}' (ignore-missing=${INPUT_IGNORE_MISSING})"
+        echo "Deleting via the Salesforce API at '${SF_INSTANCE_URL}' — ScratchOrgInfo='${INPUT_SCRATCH_ORG_INFO_ID}' OrgSnapshot='${INPUT_SNAPSHOT_ID}' (ignore-missing=${INPUT_IGNORE_MISSING})"
         # The binary owns the empty-selector guard, the delete(s), OIDC self-mint,
         # and GITHUB_OUTPUT/summary/annotations. Any non-zero exit aborts the step.
         # ignore-missing is the binary's own idempotency contract (a record that
         # does not exist is reported, not an error) — NOT shell error suppression.
         sf-org-delete
-        echo "✓ RESULT: deleted_scratch_org=${{ steps.delete.outputs.deleted_scratch_org }} (ActiveScratchOrg=${{ steps.delete.outputs.active_scratch_org_id }}) deleted_snapshot=${{ steps.delete.outputs.deleted_snapshot }} (OrgSnapshot=${{ steps.delete.outputs.snapshot_id }})"
+        echo "Deleted: deleted_scratch_org=${{ steps.delete.outputs.deleted_scratch_org }} (ActiveScratchOrg=${{ steps.delete.outputs.active_scratch_org_id }}) deleted_snapshot=${{ steps.delete.outputs.deleted_snapshot }} (OrgSnapshot=${{ steps.delete.outputs.snapshot_id }})"
