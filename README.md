@@ -55,7 +55,7 @@ jobs:
 | `snapshot-id` | no | `` | `OrgSnapshot` id, deleted directly. Use the `snapshot-id` output from `sf-snapshot-create`. |
 | `ignore-missing` | no | `true` | Do not fail when nothing matches (idempotent cleanup). When `false`, an absent target or empty selector set is an error. |
 | `eca-client-id` | no | `` | Optional OIDC tuning → `ECA_CLIENT_ID`. Baked default. |
-| `token-handler` | no | `` | Optional OIDC tuning → `TOKEN_HANDLER_APEX`. Defaults to `BBGitHubTokenExchangeHandler`. |
+| `token-handler` | no | `` | Optional OIDC tuning → `TOKEN_HANDLER_APEX`. Defaults to `GitHubTokenExchangeHandler`. |
 | `oidc-audience` | no | `` | Optional OIDC tuning → `OIDC_AUDIENCE`. Defaults to the target instance URL. |
 | `sf-instance-url` | no | `` | **Optional local-dev/advanced override** of the DevHub instance URL; wins over `target-instance`. |
 | `sf-access-token` | no | `` | **Optional local-dev/advanced override only.** A pre-obtained DevHub token; when set the binary skips OIDC self-minting. Leave empty in CI. |
