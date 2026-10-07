@@ -13,7 +13,9 @@ The action installs the prebuilt `sf-org-delete` binary (via `busbar-actions/set
 
 1. Authenticates to the DevHub via `busbar-auth` — **self-minting via GitHub OIDC by default** (set `target-instance` + grant `id-token: write`); the binary exchanges the runner's OIDC id-token for a short-lived DevHub session in-process. A handed-in `SF_ACCESS_TOKEN`/`SF_INSTANCE_URL` (via the `sf-access-token`/`sf-instance-url` inputs) is an optional local-dev override only.
 2. If `scratch-org-info-id` is given: queries the matching `ActiveScratchOrg` and issues a `DELETE` on it, which deletes the scratch org.
+   `scratch-org-id` does the same by the org's own `00D…` id; with `expected-org-name`, it refuses an org whose `OrgName` is not exactly that.
 3. If `snapshot-id` is given: issues a `DELETE` on the `OrgSnapshot` record directly.
+   With `reconcile: true` (on its own), it instead deletes every `ActiveScratchOrg` named `<name-prefix>…`, created before `created-before`, that `keep-names` does not name — oldest first, at most `max-deletes` per run. A missing `keep-names` is refused, never read as "keep nothing".
 4. Writes `GITHUB_OUTPUT`, a job-summary table, and notice annotations for any skipped (already-absent) targets.
 5. Disposes the session — revoking the OIDC-minted DevHub token and zeroizing it.
 
@@ -52,7 +54,15 @@ jobs:
 |---|---|---|---|
 | `target-instance` | no¹ | `` | **PRIMARY OIDC path.** Instance URL of the Busbar-equipped DevHub (e.g. `busbar-pilot-demo2`) to self-mint a short-lived token against. Maps to `SF_INSTANCE_URL`. |
 | `scratch-org-info-id` | no | `` | `ScratchOrgInfo` id; its matching `ActiveScratchOrg` is deleted (which deletes the scratch). Use the `scratch-org-info-id` output from `sf-org-create`. |
+| `scratch-org-id` | no | `` | The scratch org's own id (`00D…`); its `ActiveScratchOrg` is deleted. |
+| `expected-org-name` | no | `` | With `scratch-org-id`: refuse unless the org's `OrgName` is exactly this. |
 | `snapshot-id` | no | `` | `OrgSnapshot` id, deleted directly. Use the `snapshot-id` output from `sf-snapshot-create`. |
+| `reconcile` | no | `false` | Reconcile mode (runs on its own): delete orphaned orgs, see below. |
+| `name-prefix` | reconcile | `` | `OrgName` prefix of the orgs the caller creates, e.g. `eph-`. |
+| `keep-names` | reconcile | `` | JSON array of org names to keep; `[]` keeps none. |
+| `created-before` | reconcile | `` | UTC `YYYY-MM-DDThh:mm:ssZ`; only orgs created before it are candidates. |
+| `signup-email` | no | `` | Reconcile: only orgs created with this admin email. |
+| `max-deletes` | no | `10` | Reconcile: most orgs deleted per run, oldest first. |
 | `ignore-missing` | no | `true` | Do not fail when nothing matches (idempotent cleanup). When `false`, an absent target or empty selector set is an error. |
 | `eca-client-id` | no | `` | Optional OIDC tuning → `ECA_CLIENT_ID`. Baked default. |
 | `token-handler` | no | `` | Optional OIDC tuning → `TOKEN_HANDLER_APEX`. Defaults to `GitHubTokenExchangeHandler`. |
@@ -75,6 +85,10 @@ At least one of `scratch-org-info-id` / `snapshot-id` should be provided. With n
 | `scratch-org-info-id` | Echoes the requested `ScratchOrgInfo` id when provided. |
 | `active-scratch-org-id` | The `ActiveScratchOrg` id that was deleted, when one was found. |
 | `snapshot-id` | Echoes the requested `OrgSnapshot` id when provided. |
+| `scratch_org_id` | Echoes the requested scratch org id (15-character form) when provided. |
+| `reconciled_count` | Reconcile: how many orphaned orgs were deleted. |
+| `reconciled_names` | Reconcile: the names of the orgs deleted, comma-separated. |
+| `reconcile_deferred` | Reconcile: orphans left for a later run by `max-deletes`. |
 
 ## Auth & permissions — OIDC self-mint (default)
 
