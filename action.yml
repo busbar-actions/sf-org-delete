@@ -24,10 +24,42 @@ inputs:
     description: 'ScratchOrgInfo id — its matching ActiveScratchOrg will be deleted (which deletes the scratch).'
     required: false
     default: ''
+  scratch-org-id:
+    description: "The scratch org's own id (00D…, 15 or 18 characters) — its ActiveScratchOrg will be deleted."
+    required: false
+    default: ''
+  expected-org-name:
+    description: 'With scratch-org-id: refuse unless the org''s OrgName is exactly this, so a stale or mistyped id can never delete someone else''s org.'
+    required: false
+    default: ''
   snapshot-id:
     description: 'OrgSnapshot id — deleted directly.'
     required: false
     default: ''
+  reconcile:
+    description: 'Reconcile mode: delete every ActiveScratchOrg named <name-prefix>…, created before created-before, that keep-names does not name. Runs on its own.'
+    required: false
+    default: 'false'
+  name-prefix:
+    description: 'Reconcile: the OrgName prefix of the orgs the caller creates, e.g. eph-. Letters, digits and hyphens, ending in a hyphen.'
+    required: false
+    default: ''
+  keep-names:
+    description: 'Reconcile: JSON array of org names to keep. Required in reconcile mode; [] keeps none, a missing list is refused.'
+    required: false
+    default: ''
+  created-before:
+    description: 'Reconcile: only orgs created strictly before this UTC time (YYYY-MM-DDThh:mm:ssZ) are candidates.'
+    required: false
+    default: ''
+  signup-email:
+    description: 'Reconcile: only orgs whose SignupEmail is this address (the admin email the caller creates its orgs with).'
+    required: false
+    default: ''
+  max-deletes:
+    description: 'Reconcile: the most orgs one run deletes, oldest first.'
+    required: false
+    default: '10'
   ignore-missing:
     description: 'Do not fail if nothing matches (idempotent cleanup).'
     required: false
@@ -57,6 +89,18 @@ outputs:
   snapshot_id:
     description: 'Echoes the requested OrgSnapshot id when provided.'
     value: ${{ steps.delete.outputs.snapshot_id }}
+  scratch_org_id:
+    description: 'Echoes the requested scratch org id (15-character form) when provided.'
+    value: ${{ steps.delete.outputs.scratch_org_id }}
+  reconciled_count:
+    description: 'Reconcile: how many orphaned orgs were deleted.'
+    value: ${{ steps.delete.outputs.reconciled_count }}
+  reconciled_names:
+    description: 'Reconcile: the names of the orgs deleted, comma-separated.'
+    value: ${{ steps.delete.outputs.reconciled_names }}
+  reconcile_deferred:
+    description: 'Reconcile: orphans left for a later run by max-deletes.'
+    value: ${{ steps.delete.outputs.reconcile_deferred }}
 
 # The binary owns all logic and UX: it reads its inputs from INPUT_*, applies the
 # empty-selector guard, deletes the scratch org and/or snapshot, writes
@@ -83,8 +127,16 @@ runs:
       # `sf-access-token` local-dev override input.
       env:
         INPUT_SCRATCH_ORG_INFO_ID: ${{ inputs.scratch-org-info-id }}
+        INPUT_SCRATCH_ORG_ID: ${{ inputs.scratch-org-id }}
+        INPUT_EXPECTED_ORG_NAME: ${{ inputs.expected-org-name }}
         INPUT_SNAPSHOT_ID: ${{ inputs.snapshot-id }}
         INPUT_IGNORE_MISSING: ${{ inputs.ignore-missing }}
+        INPUT_RECONCILE: ${{ inputs.reconcile }}
+        INPUT_NAME_PREFIX: ${{ inputs.name-prefix }}
+        INPUT_KEEP_NAMES: ${{ inputs.keep-names }}
+        INPUT_CREATED_BEFORE: ${{ inputs.created-before }}
+        INPUT_SIGNUP_EMAIL: ${{ inputs.signup-email }}
+        INPUT_MAX_DELETES: ${{ inputs.max-deletes }}
         # DevHub instance URL: optional override wins, else `target-instance`.
         SF_INSTANCE_URL: ${{ inputs.target-instance || env.SF_INSTANCE_URL }}
         BUSBAR_ECA_CLIENT_ID: ${{ env.BUSBAR_ECA_CLIENT_ID }}
@@ -95,7 +147,7 @@ runs:
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
       run: |
         set -euo pipefail
-        echo "Deleting via the Salesforce API at '${SF_INSTANCE_URL}' — ScratchOrgInfo='${INPUT_SCRATCH_ORG_INFO_ID}' OrgSnapshot='${INPUT_SNAPSHOT_ID}' (ignore-missing=${INPUT_IGNORE_MISSING})"
+        echo "Deleting via the Salesforce API at '${SF_INSTANCE_URL}' — ScratchOrgInfo='${INPUT_SCRATCH_ORG_INFO_ID}' ScratchOrg='${INPUT_SCRATCH_ORG_ID}' OrgSnapshot='${INPUT_SNAPSHOT_ID}' reconcile=${INPUT_RECONCILE} (ignore-missing=${INPUT_IGNORE_MISSING})"
         # The binary owns the empty-selector guard, the delete(s), OIDC self-mint,
         # and GITHUB_OUTPUT/summary/annotations. Any non-zero exit aborts the step.
         # ignore-missing is the binary's own idempotency contract (a record that
